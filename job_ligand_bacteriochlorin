@@ -1,0 +1,217 @@
+#!/bin/bash
+# 
+#
+#SBATCH -e slurm-%j.e
+#SBATCH -o slurm-%j.o
+#
+#
+#
+#### CPU BATCH JOB
+#SBATCH --ntasks=4
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=4
+#SBATCH --partition=batch_gpu.q
+#SBATCH --ntasks=4
+##SBATCH -t 24:00:00
+#SBATCH --gres=gpu:v100:1
+
+source ~csainfra/projectdata/mayer21/miniforge3/etc/profile.d/conda.sh
+conda activate espaloma
+#cd /imec/other/csainfra/mayer21/protein_ligand_benchmark_tyk2_gromacs
+#PROJECTDIR=$PWD
+#cd $PROJECTDIRD
+module load GROMACS/2023.3-GPU-GCCcore-11.3.0
+gmx_mpi --version
+
+
+PDB_NAME="6xdc_bacteriochlorin_prot.pdb"
+LIGAND_NAME="bacteriochlorin.sdf"
+OUT_NAME="${PDB_NAME}_${LIGAND_NAME}"
+# ESPALOMA | SMIRNOFF | GAFF
+PARAMETRIZATION=ESPALOMA
+
+echo "PDB    :: ${PDB_NAME}"
+echo "LIGAND :: ${LIGAND_NAME}"
+echo "output :: output_${OUT_NAME}_${PARAMETRIZATION}"
+
+mkdir output_${OUT_NAME}_${PARAMETRIZATION}
+cp -r input/* output_${OUT_NAME}_${PARAMETRIZATION}
+cp openmm2gmx_protein_ligand.py output_${OUT_NAME}_${PARAMETRIZATION}
+cd output_${OUT_NAME}_${PARAMETRIZATION}
+
+
+
+for x in *.mdp
+do
+        sed -i -e 's/_TEMP_/300.0/g' $x
+done
+
+function parametrize_system {
+#        python openmm2gmx_protein_ligand.py ${PDB_NAME} ${LIGAND_NAME} ESPALOMA "${OUT_NAME}_ESPALOMA"
+#        python openmm2gmx_protein_ligand.py ${PDB_NAME} ${LIGAND_NAME} SMIRNOFF "${OUT_NAME}_SMIRNOFF"
+#        python openmm2gmx_protein_ligand.py ${PDB_NAME} ${LIGAND_NAME} GAFF "${OUT_NAME}_GAFF"
+	echo "python openmm2gmx_protein_ligand.py ${PDB_NAME} ${LIGAND_NAME} $1 ${OUT_NAME}_$1"
+	python openmm2gmx_protein_ligand.py ${PDB_NAME} ${LIGAND_NAME} $1 "${OUT_NAME}_$1"
+}
+
+#### PREPERATION ####
+function prep {
+        #(echo 0 & echo 0 & echo 0 & echo 0 & echo 0 & echo 0) | gmx_mpi pdb2gmx_mpi -f $PDB_NAME -o $OUT_NAME"".gro -p topol.top -ff charmm36-jul2022 -water tip3p -ignh -ter
+        # backup original file so that we dont have to parametrize again
+        cp $1.gro $1.gro.bak
+        # remove HOH and ions
+        python remove_by_residue.py $1.gro $1.top HOH $1.gro $1.top
+        python remove_by_residue.py $1.gro $1.top NA $1.gro $1.top
+        python remove_by_residue.py $1.gro $1.top CL $1.gro $1.top
+        # rename HOH to sol in topology
+        cp $1.top $1.top.bak
+        python rename_water_moltype_HOHtoSOL.py $1.top $1.top
+        gmx_mpi editconf -f $1.gro -o $1""_boxed.gro -c -d 4.0 -bt dodecahedron
+        gmx_mpi solvate -cp $1""_boxed.gro -cs spc216.gro -o $1""_solv.gro -p $1.top
+        python rename_water_atoms_SOLtoHOH.py $1""_solv.gro $1""_solv_hoh.gro
+        gmx_mpi grompp -f ions.mdp -c $1""_solv_hoh.gro -p $1.top -o ions.tpr -maxwarn 1
+        echo "15" | gmx_mpi genion -s ions.tpr -o $1""_ions.gro -p $1.top -pname Na -nname Cl -neutral
+
+}
+
+
+#### PREPERATION ####
+function prep_vacuum {
+        #(echo 0 & echo 0 & echo 0 & echo 0 & echo 0 & echo 0) | gmx_mpi pdb2gmx_mpi -f $PDB_NAME -o $OUT_NAME"".gro -p topol.top -ff charmm36-jul2022 -water tip3p -ignh -ter
+        # backup original file so that we dont have to parametrize again
+        cp $1.gro $1.gro.bak
+        # remove HOH and ions
+        python remove_by_residue.py $1.gro $1.top HOH $1.gro $1.top
+        python remove_by_residue.py $1.gro $1.top NA $1.gro $1.top
+        python remove_by_residue.py $1.gro $1.top CL $1.gro $1.top
+        # rename HOH to sol in topology
+        cp $1.top $1.top.bak
+        python rename_water_moltype_HOHtoSOL.py $1.top $1.top
+        gmx_mpi editconf -f $1.gro -o $1""_boxed.gro -c -d 4.0 -bt dodecahedron
+        #gmx_mpi solvate -cp $1""_boxed.gro -cs spc216.gro -o $1""_solv.gro -p $1.top
+        #python rename_water_atoms_SOLtoHOH.py $1""_solv.gro $1""_solv_hoh.gro
+        #gmx_mpi grompp -f ions.mdp -c $1""_boxed.gro -p $1.top -o ions.tpr -maxwarn 1
+        #echo "15" | gmx_mpi genion -s ions.tpr -o $1""_ions.gro -p $1.top -pname Na -nname Cl -neutral
+        #gmx_mpi genion -s ions.tpr -o $1""_vacuum_ions.gro -p $1.top -pname Na -nname Cl -neutral
+
+}
+
+function min_0_vac {
+        gmx_mpi grompp -f 0-em-steep.mdp -c $1""_boxed.gro -p $1.top -o $1_em_0_vac.tpr -maxwarn 4
+        gmx_mpi mdrun -v -deffnm $1_em_0_vac
+}
+
+## 1
+function min_1_vac {
+        gmx_mpi grompp -f 1-em-cg.mdp -c $1_em_0_vac.gro -p $1.top -o $1_em_1_vac.tpr -maxwarn 4
+        gmx_mpi mdrun -v -deffnm $1_em_1_vac
+}
+
+function min_2_vac {
+        gmx_mpi grompp -f 2-em-lbfgs.mdp -c $1_em_1_vac.gro -p $1.top -o $1_em_2_vac.tpr -maxwarn 4
+        gmx_mpi mdrun -v -deffnm $1_em_2_vac
+}
+
+#### PREPERATION ####
+function prep_solvated_from_vacuum {
+        
+	gmx_mpi solvate -cp $1_em_2_vac.gro -cs spc216.gro -o $1""_solv.gro -p $1.top
+        python rename_water_atoms_SOLtoHOH.py $1""_solv.gro $1""_solv_hoh.gro
+        gmx_mpi grompp -f ions.mdp -c $1""_solv_hoh.gro -p $1.top -o ions.tpr -maxwarn 1
+        echo "15" | gmx_mpi genion -s ions.tpr -o $1""_ions.gro -p $1.top -pname Na -nname Cl -neutral
+
+}
+
+function min_0 {
+        gmx_mpi grompp -f 0-em-steep.mdp -c $1""_ions.gro -p $1.top -o $1_em_0.tpr
+        gmx_mpi mdrun -v -deffnm $1_em_0
+}
+
+## 1
+function min_1 {
+        gmx_mpi grompp -f 1-em-cg.mdp -c $1_em_0.gro -p $1.top -o $1_em_1.tpr
+        gmx_mpi mdrun -v -deffnm $1_em_1
+}
+
+function min_2 {
+        gmx_mpi grompp -f 0-em-steep.mdp -c $1_em_1.gro -p $1.top -o $1_em_2.tpr
+        gmx_mpi mdrun -v -deffnm $1_em_2
+}
+
+## 1
+function min_3 {
+        gmx_mpi grompp -f 1-em-cg.mdp -c $1_em_2.gro -p $1.top -o $1_em_3.tpr
+        gmx_mpi mdrun -v -deffnm $1_em_3
+}
+## 2
+function min_4 {
+        gmx_mpi grompp -f 2-em-lbfgs.mdp -c $1_em_3.gro -p $1.top -o $1_em_4.tpr
+        gmx_mpi mdrun -v -deffnm $1_em_4
+}
+
+function npt_5 {
+
+
+        # generate and include ligand positional constraints
+        4#    generate ligand .gro file
+        echo 13 | gmx_mpi trjconv -s $1_em_4.tpr -f $1_em_4.gro -o $1_lig.gro
+        #    define index with group containing non hydrogen atoms of ligand
+        (echo "0 & ! a H*" && echo "q") |gmx_mpi make_ndx -f $1_lig.gro -o $1_lig.ndx
+        #    use index and .gro file to generate positional constraints outputed to itp file
+        echo  3 | gmx_mpi genrestr -f $1_lig.gro -n $1_lig.ndx -o $1_posre_lig.itp -fc 1000 1000 1000
+        #    add itp file add appropriate position in topology file
+        python add_posres_to_topology.py $1.top UNK POSRES $1_posre_lig.itp $1.top
+        #    add group for Protein+Ligand for thermostats
+        (echo "1 | 13" && echo "name 17 Protein_Lig" && echo "name 14 Water_and_ions" && echo "q") |gmx_mpi make_ndx -f $1_em_4.gro -o $1_index.ndx
+
+
+        gmx_mpi grompp -f 3-pr-npt.mdp -c $1_em_4.gro -r $1_em_4.gro -p $1.top -n $1_index.ndx -o $1_pr_npt.tpr
+        gmx_mpi mdrun -v -deffnm $1_pr_npt
+}
+
+
+function npt_6 {
+        gmx_mpi grompp -f 4-npt-relax.mdp -c $1_pr_npt.gro -r $1_pr_npt.gro -p $1.top -n $1_index.ndx -o $1_npt_relax.tpr
+        gmx_mpi mdrun -v -deffnm $1_npt_relax
+}
+
+function pull_after_npt6 {
+	(echo "13 & ! 1" && echo "name 18 Lig" && echo "q") |gmx_mpi make_ndx -n $1_index.ndx -f $1_em_4.gro -o $1_index.ndx
+	gmx_mpi grompp -f 4-npt-pulling.mdp -c $1_npt_relax.gro -r $1_npt_relax.gro -p $1.top -n $1_index.ndx -o $1_npt_pulling.tpr
+	gmx_mpi mdrun -v -deffnm $1_npt_pulling
+	# make graphs
+	gnuplot gnuplot plot_pulling_over_time
+	gnuplot plot_pulling_over_distance
+}
+
+function npt_7_prep {
+
+        gmx_mpi grompp -f 5-npt-run.mdp -c $1_npt_relax.gro -r $1_npt_relax.gro -p $1.top -n $1_index.ndx -o $1_npt_final.tpr
+}
+#gmx_mpi grompp -f 5-npt-run.mdp -c npt_relax.gro -r npt_relax.gro -p topol.top -o npt_final.tpr
+
+function npt_7 {
+#        mpirun -np $SLURM_NTASKS --mca btl_tcp_if_exclude 169.254.0.0/16,127.0.0.1/2 --display-allocation --display-map gmx_mpi mdrun -v -ntomp 6 -deffnm $1_npt_final
+	#mpirun 16 -np gmx_mpi mdrun -ntomp 8 -v -deffnm $1_npt_final -cpi $1_npt_final
+	gmx_mpi mdrun -ntomp 4 -v -deffnm $1_npt_final -cpi $1_npt_final
+}
+
+
+#parametrize_system ${PARAMETRIZATION}
+#prep_vacuum ${OUT_NAME}_${PARAMETRIZATION}
+#min_0_vac ${OUT_NAME}_${PARAMETRIZATION}
+#min_1_vac ${OUT_NAME}_${PARAMETRIZATION}
+#min_2_vac ${OUT_NAME}_${PARAMETRIZATION}
+#prep_solvated_from_vacuum ${OUT_NAME}_${PARAMETRIZATION}
+#min_0 ${OUT_NAME}_${PARAMETRIZATION}
+#min_1 ${OUT_NAME}_${PARAMETRIZATION}
+#min_2 ${OUT_NAME}_${PARAMETRIZATION}
+#min_3 ${OUT_NAME}_${PARAMETRIZATION}
+#min_4 ${OUT_NAME}_${PARAMETRIZATION}
+#npt_5 ${OUT_NAME}_${PARAMETRIZATION}
+#npt_6 ${OUT_NAME}_${PARAMETRIZATION}
+#pull_after_npt6 ${OUT_NAME}_${PARAMETRIZATION}
+#npt_7_prep ${OUT_NAME}_${PARAMETRIZATION}
+npt_7 ${OUT_NAME}_${PARAMETRIZATION}
+
+

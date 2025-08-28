@@ -1,0 +1,6 @@
+set terminal png
+set output 'force_constant_over_pullx.png'
+set title "Force on Harmonic Spring"
+set xlabel "pulling distance [nm]"
+set ylabel "Force [kJ mol^-1 nm^-1]"
+plot "< join NAME_npt_pulling_pullx.xvg NAME_npt_pulling_pullf.xvg" using 2:3 with lines title "pulling"
