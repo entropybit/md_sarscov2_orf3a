@@ -1,0 +1,16 @@
+#!/bin/bash
+
+folder=output_6xdc_SB431542_edit.pdb_ligand_sb431542_edit.sdf_ESPALOMA/
+cp input/mmpbsa.in $folder/
+cd $folder
+
+function exec_mmpbsa {
+	gmx_MMPBSA -O -i mmpbsa_$1.in -cs 6xdc_SB431542_edit.pdb_ligand_sb431542_edit.sdf_ESPALOMA_npt_final.tpr -ct 6xdc_SB431542_edit.pdb_ligand_sb431542_edit.sdf_ESPALOMA_npt_final_clustered_fit.xtc -ci 6xdc_SB431542_edit.pdb_ligand_sb431542_edit.sdf_ESPALOMA_index.ndx -cg 1 13 -cp 6xdc_SB431542_edit.pdb_ligand_sb431542_edit.sdf_ESPALOMA.top -o FINAL_RESULTS_MMPBSA_$1.dat -eo FINAL_RESULTS_MMPBSA_$1.sv
+}
+
+for ein in {1,2,3,4,5,10}
+do
+	cp mmpbsa.in mmpbsa_$ein.in
+	sed -i -e 's/__EIN__/'$ein'/g' mmpbsa_$ein.in
+	exec_mmpbsa $ein &
+done
