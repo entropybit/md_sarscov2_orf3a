@@ -36,6 +36,4 @@ To perform the umbrella sampling the jupyter notebooks https://github.com/imec-i
 are used together with the generic job scripts for running umbrella windows: [https://github.com/imec-int/md_sarscov2_orf3a/blob/main/job_ligand_bacteriochlorin](https://github.com/imec-int/md_sarscov2_orf3a/blob/main/job_ligand_sb431542_umbrella) and
 https://github.com/imec-int/md_sarscov2_orf3a/blob/main/job_ligand_bacteriochlorin_umbrella .
 
-## Bacteriochlorin
-
-## SB431542
+Finally in https://github.com/imec-int/md_sarscov2_orf3a/blob/main/run_mmbsa_SB431542 an example of how to run MMPBSA with gmx_MMPBSA can be found, using the parameters defined in mmpbsa.in.
