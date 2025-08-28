@@ -1,0 +1,59 @@
+#!/bin/bash
+# 
+#
+#SBATCH -e slurm-%j.e
+#SBATCH -o slurm-%j.o
+#
+#### GPU BATCH JOB
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=4
+#SBATCH --partition=batch_gpu.q
+#SBATCH --ntasks=4
+#SBATCH --gres=gpu:v100:1
+##SBATCH --gres=gpu:a100:1
+#
+#
+#### CPU BATCH JOB
+##SBATCH --ntasks=128
+##SBATCH --nodes=1
+##SBATCH --ntasks-per-node=128
+##SBATCH --partition=batch_csa_resvervation.q
+#
+#
+#SBATCH -t 24:00:00
+##SBATCH --dependency=afterok:2628492
+
+
+module load GROMACS/2023.3-GPU-GCCcore-11.3.0
+gmx_mpi --version
+
+
+PDB_NAME="6xdc_SB431542_edit.pdb"
+LIGAND_NAME="ligand_sb431542_edit.sdf"
+OUT_NAME="${PDB_NAME}_${LIGAND_NAME}"
+# ESPALOMA | SMIRNOFF | GAFF
+PARAMETRIZATION=ESPALOMA
+
+mkdir output_${OUT_NAME}_${PARAMETRIZATION}
+cp -r input/* output_${OUT_NAME}_${PARAMETRIZATION}
+cp openmm2gmx_protein_ligand.py output_${OUT_NAME}_${PARAMETRIZATION}
+cd output_${OUT_NAME}_${PARAMETRIZATION}
+
+
+for x in *.mdp
+do
+        sed -i -e 's/_TEMP_/300.0/g' $x
+done
+
+
+CONF="__CONF__"
+
+
+
+function umbrella_7 {
+        gmx_mpi grompp -f 5-umbrella-run.mdp -c conf${CONF}.gro -r conf${CONF}.gro -p $1.top -n $1_index.ndx -o conf${CONF}_umbrella.tpr
+	gmx_mpi mdrun -ntomp 4 -v -deffnm conf${CONF}_umbrella
+}
+
+umbrella_7 ${OUT_NAME}_${PARAMETRIZATION}
+
